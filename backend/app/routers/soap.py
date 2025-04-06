@@ -132,6 +132,10 @@ async def get_soap_note(session_id: str):
         )
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid session ID format: {session_id}")
+    except HTTPException as http_exc:
+        # Re-raise HTTP exceptions with their original status code
+        logger.error(f"HTTP error for session {session_id}: {http_exc}")
+        raise
     except Exception as e:
         logger.error(f"Failed to get SOAP note for session {session_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error retrieving SOAP note: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Error retrieving SOAP note: {str(e)}")
