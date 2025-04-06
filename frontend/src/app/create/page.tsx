@@ -90,7 +90,10 @@ export default function Create() {
       
       // Create temporary recorder to check permission
       const tempRecorder = new MicrophoneRecorder({
-        chunkDurationMs: 5000,
+        minChunkDurationMs: 2000,
+        maxChunkDurationMs: 6000,
+        silenceDurationMs: 500,
+        silenceThresholdDb: -40,
         onChunkRecorded: () => {},
         onPermissionDenied: () => {
           setMicPermission(false);
@@ -156,7 +159,10 @@ export default function Create() {
       
       // Create temporary recorder to request permission
       const tempRecorder = new MicrophoneRecorder({
-        chunkDurationMs: 5000,
+        minChunkDurationMs: 2000,
+        maxChunkDurationMs: 6000,
+        silenceDurationMs: 500,
+        silenceThresholdDb: -40,
         onChunkRecorded: () => {},
         onPermissionDenied: () => {
           setMicPermission(false);
@@ -369,7 +375,10 @@ export default function Create() {
       
       // Initialize the microphone recorder
       recorderRef.current = new MicrophoneRecorder({
-        chunkDurationMs: 5000, // 5 seconds per chunk
+        minChunkDurationMs: 2000, // Minimum 2 seconds per chunk
+        maxChunkDurationMs: 6000, // Maximum 6 seconds per chunk
+        silenceDurationMs: 500,   // 500ms of silence triggers send
+        silenceThresholdDb: -40,  // -40dBFS considered silence
         onChunkRecorded: (audioData, chunkNumber) => {
           // Don't send any audio if we're in a paused state, no longer recording, or cleanup is in progress
           if (isPausedRef.current || !isRecordingRef.current || isCleaningUp) {
@@ -839,4 +848,4 @@ export default function Create() {
       )}
     </div>
   );
-} 
+}

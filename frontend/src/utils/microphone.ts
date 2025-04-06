@@ -3,7 +3,10 @@
  */
 
 export interface RecordingOptions {
-  chunkDurationMs: number;
+  minChunkDurationMs: number;
+  maxChunkDurationMs: number;
+  silenceDurationMs: number;
+  silenceThresholdDb: number;
   onChunkRecorded: (audioData: string, chunkNumber: number) => void;
   onError?: (error: string) => void;
   onPermissionDenied?: () => void;
@@ -33,10 +36,16 @@ export class MicrophoneRecorder {
   private stream: MediaStream | null = null;
   private mediaRecorder: MediaRecorder | null = null;
   private audioContext: AudioContext | null = null;
+  private analyserNode: AnalyserNode | null = null;
+  private audioSourceNode: MediaStreamAudioSourceNode | null = null;
   private chunkCounter: number = 0;
-  private recordingInterval: NodeJS.Timeout | null = null;
+  private analysisInterval: NodeJS.Timeout | null = null;
   private isRecording: boolean = false;
   private options: RecordingOptions;
+  private currentChunkStartTime: number = 0;
+  private silenceStartTime: number = 0;
+  private isSilent: boolean = false;
+  private currentAudioChunks: Blob[] = [];
 
   constructor(options: RecordingOptions) {
     this.options = options;
@@ -179,34 +188,37 @@ export class MicrophoneRecorder {
       return false;
     }
 
-    // Initialize audio context
+    // Initialize audio context and nodes
     this.audioContext = new AudioContext();
+    this.analyserNode = this.audioContext.createAnalyser();
+    this.analyserNode.fftSize = 2048;
+    this.audioSourceNode = this.audioContext.createMediaStreamSource(this.stream!);
+    this.audioSourceNode.connect(this.analyserNode);
+
     this.isRecording = true;
     this.chunkCounter = 0;
+    this.currentChunkStartTime = Date.now();
+    this.silenceStartTime = 0;
+    this.isSilent = false;
+    this.currentAudioChunks = [];
 
-    console.log(`Starting recording with ${this.options.chunkDurationMs}ms chunks`);
+    console.log(`Starting recording with dynamic chunking (min: ${this.options.minChunkDurationMs}ms, max: ${this.options.maxChunkDurationMs}ms)`);
     
-    // Set up chunk recording at the specified interval
-    this.recordChunk();
-    this.recordingInterval = setInterval(() => {
-      this.recordChunk();
-    }, this.options.chunkDurationMs);
+    // Start the first recording session
+    this.startNewRecordingSession();
+    
+    // Start the analysis loop
+    this.analysisInterval = setInterval(() => {
+      this.analyzeAudio();
+    }, 100); // Check every 100ms
 
     return true;
   }
 
   /**
-   * Record a single audio chunk
+   * Start a new recording session
    */
-  private recordChunk(): void {
-    // If already recording, stop the current chunk before starting a new one
-    if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
-      this.mediaRecorder.stop();
-    }
-
-    const chunkNumber = this.chunkCounter++;
-    console.log(`Starting to record chunk ${chunkNumber}`);
-    
+  private startNewRecordingSession(): void {
     if (!this.stream) {
       console.error('No audio stream available');
       if (this.options.onError) {
@@ -215,64 +227,111 @@ export class MicrophoneRecorder {
       return;
     }
 
-    // Initialize media recorder for this chunk
     this.mediaRecorder = new MediaRecorder(this.stream);
-    
-    const audioChunks: Blob[] = [];
+    this.currentAudioChunks = [];
     
     this.mediaRecorder.ondataavailable = (event) => {
       if (event.data.size > 0) {
-        audioChunks.push(event.data);
+        this.currentAudioChunks.push(event.data);
       }
     };
 
-    this.mediaRecorder.onstop = async () => {
-      try {
-        if (audioChunks.length === 0) {
-          console.warn(`Chunk ${chunkNumber} has no audio data`);
-          return;
-        }
-        
-        console.log(`Processing recorded chunk ${chunkNumber} (${audioChunks.length} chunks)`);
-        
-        // Create a blob from the recorded chunks
-        const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
-        console.log(`Chunk ${chunkNumber} size: ${audioBlob.size} bytes`);
-        
-        // Convert to base64
-        const reader = new FileReader();
-        reader.readAsDataURL(audioBlob);
-        reader.onloadend = () => {
-          if (typeof reader.result === 'string') {
-            // Extract the base64 part (remove the data:audio/wav;base64, prefix)
-            const base64Audio = reader.result.split(',')[1];
-            console.log(`Chunk ${chunkNumber} converted to base64 (length: ${base64Audio.length})`);
-            this.options.onChunkRecorded(base64Audio, chunkNumber);
-          } else {
-            console.error(`Failed to convert chunk ${chunkNumber} to string`);
-            if (this.options.onError) {
-              this.options.onError(`Failed to process audio: Invalid data format`);
-            }
-          }
-        };
-      } catch (error) {
-        console.error(`Failed to process chunk ${chunkNumber}:`, error);
-        if (this.options.onError) {
-          this.options.onError(`Failed to process audio chunk: ${error}`);
-        }
-      }
+    this.mediaRecorder.onstop = () => {
+      this.processAndSendChunk();
     };
 
-    // Start recording this chunk
     this.mediaRecorder.start();
+    this.currentChunkStartTime = Date.now();
+    this.silenceStartTime = 0;
+    this.isSilent = false;
+  }
+
+  /**
+   * Analyze audio for silence detection
+   */
+  private analyzeAudio(): void {
+    if (!this.analyserNode || !this.isRecording) return;
+
+    const bufferLength = this.analyserNode.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+    this.analyserNode.getByteFrequencyData(dataArray);
+
+    // Calculate RMS volume in dBFS
+    let sum = 0;
+    for (let i = 0; i < bufferLength; i++) {
+      sum += dataArray[i] * dataArray[i];
+    }
+    const rms = Math.sqrt(sum / bufferLength);
+    const volumeDb = 20 * Math.log10(rms / 255);
+
+    const now = Date.now();
+    const chunkDuration = now - this.currentChunkStartTime;
+
+    // Update silence state
+    if (volumeDb > this.options.silenceThresholdDb) {
+      this.isSilent = false;
+      this.silenceStartTime = 0;
+    } else if (!this.isSilent) {
+      this.isSilent = true;
+      this.silenceStartTime = now;
+    }
+
+    // Check if we should finalize the current chunk
+    const silenceDuration = this.isSilent ? now - this.silenceStartTime : 0;
+    const shouldFinalize = 
+      (this.isSilent && 
+       silenceDuration >= this.options.silenceDurationMs && 
+       chunkDuration >= this.options.minChunkDurationMs) ||
+      (chunkDuration >= this.options.maxChunkDurationMs);
+
+    if (shouldFinalize && this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+      this.mediaRecorder.stop();
+    }
+  }
+
+  /**
+   * Process and send the current audio chunk
+   */
+  private processAndSendChunk(): void {
+    const chunkNumber = this.chunkCounter++;
     
-    // Stop after the chunk duration (slightly less to allow for processing)
-    setTimeout(() => {
-      if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
-        console.log(`Stopping chunk ${chunkNumber} recording`);
-        this.mediaRecorder.stop();
+    try {
+      if (this.currentAudioChunks.length === 0) {
+        console.warn(`Chunk ${chunkNumber} has no audio data`);
+        return;
       }
-    }, this.options.chunkDurationMs - 100);
+      
+      console.log(`Processing recorded chunk ${chunkNumber} (${this.currentAudioChunks.length} chunks)`);
+      
+      // Create a blob from the recorded chunks
+      const audioBlob = new Blob(this.currentAudioChunks, { type: 'audio/wav' });
+      console.log(`Chunk ${chunkNumber} size: ${audioBlob.size} bytes`);
+      
+      // Convert to base64
+      const reader = new FileReader();
+      reader.readAsDataURL(audioBlob);
+      reader.onloadend = () => {
+        if (typeof reader.result === 'string') {
+          // Extract the base64 part (remove the data:audio/wav;base64, prefix)
+          const base64Audio = reader.result.split(',')[1];
+          console.log(`Chunk ${chunkNumber} converted to base64 (length: ${base64Audio.length})`);
+          this.options.onChunkRecorded(base64Audio, chunkNumber);
+          
+          // Start a new recording session
+          this.startNewRecordingSession();
+        } else {
+          console.error(`Failed to convert chunk ${chunkNumber} to string`);
+          if (this.options.onError) {
+            this.options.onError(`Failed to process audio: Invalid data format`);
+          }
+        }
+      };
+    } catch (error) {
+      console.error(`Failed to process chunk ${chunkNumber}:`, error);
+      if (this.options.onError) {
+        this.options.onError(`Failed to process audio chunk: ${error}`);
+      }
+    }
   }
 
   /**
@@ -281,9 +340,9 @@ export class MicrophoneRecorder {
   stopRecording(): void {
     console.log('Stopping all recording');
     
-    if (this.recordingInterval) {
-      clearInterval(this.recordingInterval);
-      this.recordingInterval = null;
+    if (this.analysisInterval) {
+      clearInterval(this.analysisInterval);
+      this.analysisInterval = null;
     }
 
     if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
@@ -300,6 +359,17 @@ export class MicrophoneRecorder {
     console.log('Cleaning up microphone recorder resources');
     this.stopRecording();
     
+    // Disconnect audio nodes
+    if (this.audioSourceNode) {
+      this.audioSourceNode.disconnect();
+      this.audioSourceNode = null;
+    }
+    if (this.analyserNode) {
+      this.analyserNode.disconnect();
+      this.analyserNode = null;
+    }
+
+    // Stop and clean up stream
     if (this.stream) {
       this.stream.getTracks().forEach(track => {
         console.log(`Stopping audio track: ${track.kind}`);
@@ -308,6 +378,7 @@ export class MicrophoneRecorder {
       this.stream = null;
     }
 
+    // Close audio context
     if (this.audioContext) {
       this.audioContext.close();
       this.audioContext = null;
