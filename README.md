@@ -11,8 +11,15 @@ A real-time doctor-patient encounter transcription system that generates SOAP no
    - npm (Node package manager)
 
 2. Clone the repository
-3. Run the application:
-
+3. Configure environment variables:
+Makre sure you are in backend folder otherwise run the cd command
+```bash
+cd backend
+cp .env.example .env
+# Edit .env with your API keys
+```
+4. Run the application:
+Make sure you are in root folder
 ```bash
 chmod +x run_app.sh
 ./run_app.sh
