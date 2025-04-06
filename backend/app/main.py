@@ -80,7 +80,8 @@ async def root():
             "/api/v2/dispatcher/status - Get dispatcher status",
         ],
         "workflow": "1. Create a session with POST /api/sessions, 2. Connect to WebSocket with the returned session_id, 3. Send audio chunks via WebSocket",
-        "configured_provider": settings.TRANSCRIPTION_PROVIDER
+        "configured_provider": settings.TRANSCRIPTION_PROVIDER,
+        "streaming_enabled": settings.USE_STREAMING_TRANSCRIPTION
     }
 
 print("FastAPI app created and configured. To run the server use: uvicorn app.main:app --reload")

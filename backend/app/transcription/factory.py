@@ -89,6 +89,11 @@ def get_transcription_service(
             logger.warning("No Deepgram API key provided, using placeholder")
         
         service = DeepgramTranscriptionService(api_key=deepgram_api_key)
+        
+        # Note: For streaming with Deepgram, use the DeepgramStreamingService directly
+        # This factory only returns batch transcription services
+        logger.info("Created Deepgram batch transcription service. For streaming, configure USE_STREAMING_TRANSCRIPTION=True")
+        
     elif provider == "whisper":
         # Try to get API key from environment if not provided
         openai_api_key = api_key or os.environ.get("OPENAI_API_KEY")

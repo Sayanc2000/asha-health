@@ -5,6 +5,7 @@ from app.config import get_settings, Settings
 from app.transcription.factory import get_transcription_service
 from app.store.storage import get_transcript_store
 from app.schemas import TranscriptionRequest, TranscriptionResponse
+from app.routers.websocket import active_streams  # Import the active_streams dictionary
 
 # Create router
 router = APIRouter(
@@ -207,4 +208,24 @@ async def get_dispatcher_status():
             }
             for session_id, serials in sessions.items()
         ]
+    }
+
+
+@router.get("/streaming/status", response_model=dict)
+async def get_streaming_status(settings: Settings = Depends(get_settings)):
+    """
+    Get the status of active streaming connections.
+    
+    Returns:
+        Dict with streaming status info
+    """
+    is_enabled = settings.USE_STREAMING_TRANSCRIPTION and settings.TRANSCRIPTION_PROVIDER == "deepgram"
+    active_sessions = list(active_streams.keys())
+    
+    return {
+        "status": "success",
+        "streaming_enabled": is_enabled,
+        "active_sessions": active_sessions,
+        "active_count": len(active_sessions),
+        "provider": settings.TRANSCRIPTION_PROVIDER
     } 

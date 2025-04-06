@@ -19,6 +19,10 @@ class Settings(BaseSettings):
         default="dummy",
         description="Provider for transcription service (dummy, deepgram, whisper)"
     )
+    USE_STREAMING_TRANSCRIPTION: bool = Field(
+        default=False,
+        description="Use streaming transcription for real-time results"
+    )
     DEEPGRAM_API_KEY: Optional[str] = Field(
         default=None,
         description="API key for Deepgram"
