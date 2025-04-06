@@ -1,7 +1,6 @@
 __pycache__
 .env
 .env.local
-.env.example
 *.log
 *.db
 audio_chunk_10s.wav
