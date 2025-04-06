@@ -317,8 +317,12 @@ export class MicrophoneRecorder {
           console.log(`Chunk ${chunkNumber} converted to base64 (length: ${base64Audio.length})`);
           this.options.onChunkRecorded(base64Audio, chunkNumber);
           
-          // Start a new recording session
-          this.startNewRecordingSession();
+          // Only start a new recording session if we're still recording
+          if (this.isRecording) {
+            this.startNewRecordingSession();
+          } else {
+            console.log(`Not starting new recording session for chunk ${chunkNumber}: recording stopped`);
+          }
         } else {
           console.error(`Failed to convert chunk ${chunkNumber} to string`);
           if (this.options.onError) {
