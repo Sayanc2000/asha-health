@@ -12,12 +12,24 @@ class DefaultSOAPProcessor(BaseSOAPProcessor):
         # Build a generic prompt for SOAP note generation
         prompt = (
             "Generate a structured clinical SOAP note from the following transcript. "
-            "The note should include the sections: Subjective, Objective, Assessment, and Plan.\n\n"
-            "Make sure you only pick data from the transcript that is provided, please do not create new information. "
-            "Your job is to understand given information and organize it into a SOAP note."
-            "You can use special md type characters to properly format the note."
-            "Please just return only the SOAP note, do not include any other text or comments, you also do not need to specify the type of file in the response"
-            f"Transcript:\n{transcript_text}\n\nSOAP Note:"
+            "The SOAP note must include exactly the following sections:\n\n"
+            "- **Subjective:** Patient-reported information extracted from the transcript.\n"
+            "- **Objective:** Observable and measurable data mentioned in the transcript.\n"
+            "- **Assessment:** Analysis or diagnosis based solely on the provided transcript.\n"
+            "- **Plan:** Recommended actions or treatment derived from the transcript.\n\n"
+            "Do not include any part of the transcript in your output. "
+            "Use only the information in the transcript to generate the SOAP note. "
+            "Return only the SOAP note in plain text using Markdown formatting, without any extra commentary. "
+            "Output exactly in the following format:\n\n"
+            "```\n"
+            "Subjective:\n[Your content here]\n\n"
+            "Objective:\n[Your content here]\n\n"
+            "Assessment:\n[Your content here]\n\n"
+            "Plan:\n[Your content here]\n"
+            "```\n\n"
+            "Transcript for context (do not include in your response):\n"
+            f"{transcript_text}\n\n"
+            "SOAP Note:"
         )
         headers = {
             "Authorization": f"Bearer {self.api_key}",

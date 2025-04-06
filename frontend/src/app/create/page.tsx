@@ -19,6 +19,8 @@ export default function Create() {
   const [step, setStep] = useState<"setup" | "transcription">("setup");
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [isCleaningUp, setIsCleaningUp] = useState(false);
+  const [isClient, setIsClient] = useState(false);
+  const [isInsecureContext, setIsInsecureContext] = useState(false);
   
   const wsRef = useRef<TranscriptionWebSocket | null>(null);
   const recorderRef = useRef<MicrophoneRecorder | null>(null);
@@ -35,20 +37,56 @@ export default function Create() {
   }, [isRecording]);
   
   useEffect(() => {
-    // Check for microphone permission on component mount
-    checkMicrophonePermission();
+    setIsClient(true);
+    
+    // Check if we're in an insecure context that might need special handling
+    if (typeof window !== 'undefined') {
+      setIsInsecureContext(
+        window.location.protocol === 'http:' && 
+        !isLocalhost()
+      );
+    }
+  }, []);
+  
+  useEffect(() => {
+    // Only run this on client side
+    if (isClient) {
+      // Check for microphone permission on component mount
+      checkMicrophonePermission();
+    }
     
     // Clean up resources when the component unmounts
     return () => {
       cleanupResources();
     };
-  }, []);
+  }, [isClient]);
   
   /**
    * Check for microphone permission
    */
   const checkMicrophonePermission = async () => {
     try {
+      // Check if the API is available first
+      if (!navigator?.mediaDevices || !navigator?.mediaDevices?.getUserMedia) {
+        console.error("MediaDevices API not available");
+        setMicPermission(false);
+        
+        // Provide more specific guidance for local development
+        if (window.location.protocol === 'http:' && !isLocalhost()) {
+          setError(
+            "Your browser restricts microphone access on non-HTTPS connections. " +
+            "For local development, please use 'localhost' instead of an IP address, " +
+            "or run the app with HTTPS."
+          );
+        } else {
+          setError(
+            "Your browser doesn't support microphone access. " +
+            "Please use a modern browser like Chrome, Firefox, or Edge."
+          );
+        }
+        return;
+      }
+      
       // Create temporary recorder to check permission
       const tempRecorder = new MicrophoneRecorder({
         chunkDurationMs: 5000,
@@ -63,8 +101,9 @@ export default function Create() {
       setMicPermission(hasPermission);
       tempRecorder.cleanup();
     } catch (error) {
+      console.error("Error checking microphone permission:", error);
       setMicPermission(false);
-      setError(`Failed to check microphone permission: ${error}`);
+      setError(`${error instanceof Error ? error.message : "Failed to check microphone permission"}`);
     }
   };
   
@@ -75,6 +114,44 @@ export default function Create() {
     try {
       setIsLoading(true);
       setError(null);
+      
+      // First check if the API is available
+      if (!navigator?.mediaDevices || !navigator?.mediaDevices?.getUserMedia) {
+        // Provide more specific guidance for local development
+        if (window.location.protocol === 'http:' && !isLocalhost()) {
+          setError(
+            "Your browser restricts microphone access on non-HTTPS connections. " +
+            "For local development, please use 'localhost' instead of an IP address, " +
+            "or run the app with HTTPS."
+          );
+        } else {
+          setError(
+            "Your browser doesn't support microphone access. " +
+            "Please use a modern browser like Chrome, Firefox, or Edge."
+          );
+        }
+        setMicPermission(false);
+        return;
+      }
+
+      // Try direct getUserMedia approach first to force permission dialog
+      try {
+        console.log("Directly requesting microphone access...");
+        const directStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        
+        // If we get here, permission was granted directly
+        console.log("Microphone permission granted via direct request");
+        
+        // Clean up the stream we just created
+        directStream.getTracks().forEach(track => track.stop());
+        
+        setMicPermission(true);
+        setIsLoading(false);
+        return;
+      } catch (directError) {
+        console.error("Direct permission request failed:", directError);
+        // Continue with the normal approach
+      }
       
       // Create temporary recorder to request permission
       const tempRecorder = new MicrophoneRecorder({
@@ -94,10 +171,24 @@ export default function Create() {
         setError("Microphone permission is required to use this application.");
       }
     } catch (error) {
-      setError(`Failed to request microphone permission: ${error}`);
+      console.error("Error in microphone permission request:", error);
+      setError(`${error instanceof Error ? error.message : "Failed to request microphone permission"}`);
+      setMicPermission(false);
     } finally {
       setIsLoading(false);
     }
+  };
+
+  /**
+   * Check if we're running on localhost
+   */
+  const isLocalhost = (): boolean => {
+    return (
+      window.location.hostname === 'localhost' || 
+      window.location.hostname === '127.0.0.1' ||
+      window.location.hostname.startsWith('192.168.') ||
+      window.location.hostname.startsWith('10.0.')
+    );
   };
 
   /**
@@ -109,6 +200,20 @@ export default function Create() {
       setError(null);
       
       const patientName = sessionName.trim() || "Patient Visit";
+      
+      // If we're in an insecure context or don't have mic permission yet,
+      // try requesting it now before creating the session
+      if ((micPermission === false || isInsecureContext) && navigator?.mediaDevices?.getUserMedia) {
+        console.log("Attempting to get microphone permission before creating session...");
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          stream.getTracks().forEach(track => track.stop());
+          setMicPermission(true);
+        } catch (micError) {
+          console.error("Could not get microphone permission:", micError);
+          // Continue anyway - the user clicked start deliberately
+        }
+      }
       
       const response = await fetch("/backend/api/sessions", {
         method: "POST",
@@ -501,15 +606,21 @@ export default function Create() {
           <div className="max-w-md mx-auto">
             <h1 className="text-3xl font-bold mb-6 text-center text-blue-700">New Patient Encounter</h1>
             
-            {micPermission === false && (
+            {(micPermission === false || isInsecureContext) && (
               <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
                 <p className="font-bold">Microphone Access Required</p>
-                <p>This application needs access to your microphone to work.</p>
+                <p>
+                  {isInsecureContext 
+                    ? "Your browser restricts microphone access on non-HTTPS connections. For local development, use 'localhost' instead of an IP address, or run with HTTPS."
+                    : "This application needs access to your microphone to work."}
+                </p>
                 <button
                   onClick={requestMicrophonePermission}
-                  className="mt-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded"
+                  disabled={isLoading}
+                  className={`mt-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded 
+                             ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
-                  Grant Microphone Access
+                  {isLoading ? 'Requesting access...' : 'Grant Microphone Access'}
                 </button>
               </div>
             )}
@@ -532,9 +643,9 @@ export default function Create() {
               
               <button
                 type="submit"
-                disabled={isLoading || micPermission === false}
+                disabled={isLoading}
                 className={`w-full px-6 py-3 rounded-lg font-medium text-lg bg-blue-600 hover:bg-blue-700 text-white
-                  ${(isLoading || micPermission === false) ? "opacity-50 cursor-not-allowed" : ""}`}
+                  ${isLoading ? "opacity-50 cursor-not-allowed" : ""}`}
               >
                 {isLoading ? "Starting session..." : "Begin Patient Encounter"}
               </button>
@@ -546,6 +657,22 @@ export default function Create() {
                 </div>
               )}
             </form>
+            
+            {isInsecureContext && (
+              <div className="mt-6 p-4 bg-yellow-50 border border-yellow-200 rounded-md text-yellow-800 text-sm">
+                <p className="font-semibold mb-1">⚠️ Local Development on HTTP</p>
+                <p>
+                  You're running this app over HTTP, which may cause issues with microphone access.
+                  For reliable microphone access, use one of these approaches:
+                </p>
+                <ul className="list-disc list-inside mt-2 space-y-1">
+                  <li>Access the app using <strong>localhost</strong> instead of an IP address</li>
+                  <li>Set up HTTPS locally with a self-signed certificate</li>
+                  <li>Run your app with <code className="bg-yellow-100 px-1 rounded">HTTPS=true npm start</code> if using Create React App</li>
+                  <li>For Next.js, use <code className="bg-yellow-100 px-1 rounded">next dev --experimental-https</code></li>
+                </ul>
+              </div>
+            )}
           </div>
         </main>
       </div>
@@ -584,15 +711,21 @@ export default function Create() {
           </div>
           
           <div className="mb-6 flex flex-wrap gap-3">
-            {micPermission === false && (
+            {(micPermission === false || isInsecureContext) && (
               <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4 w-full">
                 <p className="font-bold">Microphone Access Required</p>
-                <p>This application needs access to your microphone to work.</p>
+                <p>
+                  {isInsecureContext 
+                    ? "Your browser restricts microphone access on non-HTTPS connections. For local development, use 'localhost' instead of an IP address, or run with HTTPS."
+                    : "This application needs access to your microphone to work."}
+                </p>
                 <button
                   onClick={requestMicrophonePermission}
-                  className="mt-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded"
+                  disabled={isLoading}
+                  className={`mt-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded 
+                            ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
-                  Grant Microphone Access
+                  {isLoading ? 'Requesting access...' : 'Grant Microphone Access'}
                 </button>
               </div>
             )}

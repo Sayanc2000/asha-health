@@ -9,6 +9,26 @@ export interface RecordingOptions {
   onPermissionDenied?: () => void;
 }
 
+/**
+ * Checks if the current environment is considered secure for media access
+ * (either HTTPS or localhost)
+ */
+function isSecureContext(): boolean {
+  // Check if we're in a secure context (HTTPS)
+  if (window.isSecureContext) {
+    return true;
+  }
+  
+  // Also allow localhost for development
+  const isLocalhost = 
+    window.location.hostname === 'localhost' || 
+    window.location.hostname === '127.0.0.1' ||
+    window.location.hostname.startsWith('192.168.') ||
+    window.location.hostname.startsWith('10.0.');
+    
+  return isLocalhost;
+}
+
 export class MicrophoneRecorder {
   private stream: MediaStream | null = null;
   private mediaRecorder: MediaRecorder | null = null;
@@ -28,8 +48,33 @@ export class MicrophoneRecorder {
   async requestPermission(): Promise<boolean> {
     try {
       console.log('Requesting microphone permission...');
+      
+      // Check if mediaDevices API is available
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        console.error('MediaDevices API not available in this browser or context');
+        
+        // Check if we're in a non-secure context that's not localhost
+        if (!isSecureContext()) {
+          throw new Error(
+            'Media devices require a secure context (HTTPS) in production. ' +
+            'For local development, try using localhost instead of an IP address.'
+          );
+        } else {
+          throw new Error('Media devices not supported in this browser.');
+        }
+      }
+      
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       console.log('Microphone permission granted');
+      
+      // Make sure we create a new MediaStream instance to ensure permissions are properly applied
+      if (this.stream) {
+        // Stop any existing tracks before creating new ones
+        this.stream.getTracks().forEach(track => track.stop());
+      }
+      
+      // Re-request the stream to ensure we have fresh permissions
+      this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       return true;
     } catch (error) {
       console.error('Error accessing microphone:', error);
@@ -46,14 +91,66 @@ export class MicrophoneRecorder {
   async checkPermission(): Promise<boolean> {
     try {
       console.log('Checking microphone permission status...');
-      const permissionStatus = await navigator.permissions.query({ name: 'microphone' as PermissionName });
-      console.log('Microphone permission status:', permissionStatus.state);
-      return permissionStatus.state === 'granted';
+      
+      // Check if mediaDevices API is available
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        console.error('MediaDevices API not available in this browser or context');
+        
+        // Check if we're in a non-secure context that's not localhost
+        if (!isSecureContext()) {
+          throw new Error(
+            'Media devices require a secure context (HTTPS) in production. ' +
+            'For local development, try using localhost instead of an IP address.'
+          );
+        } else {
+          throw new Error('Media devices not supported in this browser.');
+        }
+      }
+      
+      // Try permissions API first
+      try {
+        const permissionStatus = await navigator.permissions.query({ name: 'microphone' as PermissionName });
+        console.log('Microphone permission status:', permissionStatus.state);
+        
+        // Listen for permission changes
+        permissionStatus.addEventListener('change', () => {
+          console.log('Permission status changed to:', permissionStatus.state);
+          if (permissionStatus.state === 'granted' && !this.isRecording) {
+            // If permission was just granted, we might want to initialize the stream
+            this.initializeStream();
+          }
+        });
+        
+        return permissionStatus.state === 'granted';
+      } catch (permError) {
+        console.warn('Browser does not support permission query, falling back to getUserMedia check:', permError);
+        // Fallback for browsers that don't support permission query
+        return this.requestPermission();
+      }
     } catch (error) {
-      console.warn('Browser does not support permission query, falling back to getUserMedia check');
-      // Fallback for browsers that don't support permission query
-      return this.requestPermission();
+      console.error('Error checking microphone permission:', error);
+      return false;
     }
+  }
+
+  /**
+   * Initialize the audio stream
+   */
+  private async initializeStream(): Promise<boolean> {
+    if (!this.stream) {
+      try {
+        console.log('Initializing audio stream...');
+        this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        return true;
+      } catch (error) {
+        console.error('Failed to initialize microphone:', error);
+        if (this.options.onError) {
+          this.options.onError('Failed to initialize microphone');
+        }
+        return false;
+      }
+    }
+    return true;
   }
 
   /**
@@ -77,17 +174,9 @@ export class MicrophoneRecorder {
     }
 
     // Initialize audio stream if not already done
-    if (!this.stream) {
-      try {
-        console.log('Initializing audio stream...');
-        this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      } catch (error) {
-        console.error('Failed to initialize microphone:', error);
-        if (this.options.onError) {
-          this.options.onError('Failed to initialize microphone');
-        }
-        return false;
-      }
+    const streamInitialized = await this.initializeStream();
+    if (!streamInitialized) {
+      return false;
     }
 
     // Initialize audio context
