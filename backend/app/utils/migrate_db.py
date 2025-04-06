@@ -2,13 +2,17 @@
 Script to upgrade database schema for transcript table
 """
 import asyncio
+import argparse
+import json
+from loguru import logger
 import sqlalchemy as sa
+from sqlalchemy.future import select
+import uuid
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
-import uuid
-from loguru import logger
 
-from app.models import engine, Base, async_session, Transcript
+from app.database import engine, Base, async_session
+from app.models import Transcript
 
 async def migrate_transcript_table():
     """Upgrade the transcript table schema to add speaker column and UUID id"""

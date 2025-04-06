@@ -6,8 +6,10 @@ from loguru import logger
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 import json
+import uuid
 
-from app.models import Transcript, async_session
+from app.database import async_session
+from app.models import Transcript
 from .storage import TranscriptRecord, TranscriptSegment, get_transcript_store
 
 
@@ -126,20 +128,28 @@ class TranscriptDispatcher:
                         # Get the most common speaker
                         primary_speaker = max(speaker_counts.items(), key=lambda x: x[1])[0]
                     
-                    # Create DB model instance
-                    transcript = Transcript(
-                        session_id=record.session_id,
-                        serial=record.serial,
-                        transcript=record.transcript,
-                        speaker=primary_speaker,
-                        created_at=record.created_at
-                    )
-                    db_transcripts.append(transcript)
+                    try:
+                        # Convert string session_id to UUID object
+                        session_uuid = uuid.UUID(record.session_id)
+                        
+                        # Create DB model instance
+                        transcript = Transcript(
+                            session_id=session_uuid,
+                            serial=record.serial,
+                            transcript=record.transcript,
+                            speaker=primary_speaker,
+                            created_at=record.created_at
+                        )
+                        db_transcripts.append(transcript)
+                    except ValueError as e:
+                        logger.error(f"Invalid session ID format: {record.session_id}, skipping record: {e}")
                 
-                # Add all transcripts to the session
-                session.add_all(db_transcripts)
-                
-                # Commit happens automatically at the end of the context manager
+                if db_transcripts:
+                    # Add all transcripts to the session
+                    session.add_all(db_transcripts)
+                    # Commit happens automatically at the end of the context manager
+                else:
+                    logger.warning("No valid transcripts to save to database")
 
 
 # Singleton instance

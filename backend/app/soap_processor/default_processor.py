@@ -13,6 +13,10 @@ class DefaultSOAPProcessor(BaseSOAPProcessor):
         prompt = (
             "Generate a structured clinical SOAP note from the following transcript. "
             "The note should include the sections: Subjective, Objective, Assessment, and Plan.\n\n"
+            "Make sure you only pick data from the transcript that is provided, please do not create new information. "
+            "Your job is to understand given information and organize it into a SOAP note."
+            "You can use special md type characters to properly format the note."
+            "Please just return only the SOAP note, do not include any other text or comments, you also do not need to specify the type of file in the response"
             f"Transcript:\n{transcript_text}\n\nSOAP Note:"
         )
         headers = {

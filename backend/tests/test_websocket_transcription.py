@@ -36,7 +36,8 @@ os.environ["SOAP_API_ENDPOINT"] = "https://test-api.example.com/soap"
 if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from app.models import Transcript, SOAPNote, async_session
+from app.database import async_session
+from app.models import Transcript, SOAPNote
 
 # Configuration
 WEBSOCKET_URL = "ws://localhost:8000/ws/"

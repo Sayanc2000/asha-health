@@ -3,8 +3,10 @@ from typing import Dict, Optional, List, Any
 from loguru import logger
 import sqlalchemy as sa
 from sqlalchemy.future import select
+import uuid
 
-from .models import async_session, Transcript, SOAPNote
+from .database import async_session
+from .models import Transcript, SOAPNote
 from .soap_processor import get_soap_processor
 from .store.storage import get_transcript_store, TranscriptRecord
 from .config import get_settings
@@ -26,61 +28,69 @@ async def process_and_store_soap_note(session_id: str, provider: str = "default"
     Raises:
         ValueError: If no transcripts are found for the session
     """
-    # 1. Retrieve transcript text using the in-memory store first
-    transcript_store = get_transcript_store()
-    transcript_records = await transcript_store.get_transcripts_for_session(session_id)
-    
-    # If no transcripts in memory, try the database
-    if not transcript_records:
-        logger.info(f"No transcripts found in memory for session {session_id}, checking database")
-        async with async_session() as session:
-            result = await session.execute(
-                select(Transcript)
-                .filter(Transcript.session_id == session_id)
-                .order_by(Transcript.serial)
-            )
-            db_transcripts = result.scalars().all()
-            
-            if not db_transcripts:
-                logger.error(f"No transcripts found for session {session_id}")
-                raise ValueError(f"No transcripts found for session {session_id}")
-            
-            # Convert DB transcripts to text
-            transcript_text = "\n".join([t.transcript for t in db_transcripts])
-    else:
-        # Order transcripts by serial number and convert to text
-        transcript_text = "\n".join([record.transcript for record in transcript_records])
-    
-    if not transcript_text:
-        logger.error(f"Empty transcript text for session {session_id}")
-        raise ValueError(f"Empty transcript text for session {session_id}")
-        
-    logger.info(f"Retrieved transcripts for session {session_id}, generating SOAP note")
-    
-    # 2. Generate SOAP note using the SOAP processor
-    soap_processor = get_soap_processor(
-        provider=provider,
-        endpoint=settings.SOAP_API_ENDPOINT,
-        api_key=settings.SOAP_API_KEY
-    )
     try:
-        soap_text = await soap_processor.process(transcript_text)
-    except Exception as e:
-        logger.error(f"Failed to generate SOAP note for session {session_id}: {e}")
-        raise
-    
-    # 3. Store the SOAP note in the database
-    async with async_session() as session:
-        new_soap = SOAPNote(
-            session_id=session_id,
-            soap_text=soap_text
-        )
-        session.add(new_soap)
-        await session.commit()
-        await session.refresh(new_soap)
+        # Convert session_id to UUID
+        session_uuid = uuid.UUID(session_id)
         
-    logger.info(f"Stored SOAP note for session {session_id}")
-    return new_soap
+        # 1. Retrieve transcript text using the in-memory store first
+        transcript_store = get_transcript_store()
+        transcript_records = await transcript_store.get_transcripts_for_session(session_id)
+        
+        # If no transcripts in memory, try the database
+        if not transcript_records:
+            logger.info(f"No transcripts found in memory for session {session_id}, checking database")
+            async with async_session() as session:
+                result = await session.execute(
+                    select(Transcript)
+                    .filter(Transcript.session_id == session_uuid)
+                    .order_by(Transcript.serial)
+                )
+                db_transcripts = result.scalars().all()
+                
+                if not db_transcripts:
+                    logger.error(f"No transcripts found for session {session_id}")
+                    raise ValueError(f"No transcripts found for session {session_id}")
+                
+                # Convert DB transcripts to text
+                transcript_text = "\n".join([t.transcript for t in db_transcripts])
+        else:
+            # Order transcripts by serial number and convert to text
+            transcript_text = "\n".join([record.transcript for record in transcript_records])
+        
+        if not transcript_text:
+            logger.error(f"Empty transcript text for session {session_id}")
+            raise ValueError(f"Empty transcript text for session {session_id}")
+            
+        logger.info(f"Retrieved transcripts for session {session_id}, generating SOAP note")
+        
+        # 2. Generate SOAP note using the SOAP processor
+        soap_processor = get_soap_processor(
+            provider=provider,
+            endpoint=settings.SOAP_API_ENDPOINT,
+            api_key=settings.SOAP_API_KEY
+        )
+        try:
+            soap_text = await soap_processor.process(transcript_text)
+        except Exception as e:
+            logger.error(f"Failed to generate SOAP note for session {session_id}: {e}")
+            raise
+        
+        # 3. Store the SOAP note in the database
+        async with async_session() as session:
+            new_soap = SOAPNote(
+                session_id=session_uuid,
+                soap_text=soap_text
+            )
+            session.add(new_soap)
+            await session.commit()
+            await session.refresh(new_soap)
+            
+        logger.info(f"Stored SOAP note for session {session_id}")
+        return new_soap
+    except ValueError as e:
+        if "invalid literal for UUID" in str(e):
+            logger.error(f"Invalid session ID format: {session_id}")
+        raise
 
 
 async def get_soap_note_for_session(session_id: str) -> Optional[SOAPNote]:
@@ -93,15 +103,22 @@ async def get_soap_note_for_session(session_id: str) -> Optional[SOAPNote]:
     Returns:
         The SOAPNote object if found, None otherwise
     """
-    async with async_session() as session:
-        result = await session.execute(
-            select(SOAPNote)
-            .filter(SOAPNote.session_id == session_id)
-            .order_by(SOAPNote.created_at.desc())
-        )
-        soap_note = result.scalars().first()
+    try:
+        # Convert session_id to UUID
+        session_uuid = uuid.UUID(session_id)
         
-    return soap_note
+        async with async_session() as session:
+            result = await session.execute(
+                select(SOAPNote)
+                .filter(SOAPNote.session_id == session_uuid)
+                .order_by(SOAPNote.created_at.desc())
+            )
+            soap_note = result.scalars().first()
+            
+        return soap_note
+    except ValueError as e:
+        logger.error(f"Invalid session ID format in get_soap_note_for_session: {session_id}, {e}")
+        return None
 
 
 async def generate_soap_note_background(session_id: str, provider: str = "default"):

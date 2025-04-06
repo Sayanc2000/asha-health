@@ -7,13 +7,13 @@ from functools import lru_cache
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
-    
+
     # Database settings
     DATABASE_URL: str = Field(
         default="sqlite+aiosqlite:///./test.db",
         description="Database connection string"
     )
-    
+
     # Transcription service settings
     TRANSCRIPTION_PROVIDER: str = Field(
         default="dummy",
@@ -27,17 +27,17 @@ class Settings(BaseSettings):
         default=None,
         description="API key for OpenAI Whisper"
     )
-    
+
     # SOAP service settings
     SOAP_API_KEY: Optional[str] = Field(
-        default=None,
-        description="API key for SOAP note generation service"
+        default="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",
+        description="API key for SOAP note generation service",
     )
     SOAP_API_ENDPOINT: Optional[str] = Field(
-        default="https://api.example.com/soap",
-        description="Endpoint URL for SOAP note generation service"
+        default="https://openrouter.ai/api/v1/completions",
+        description="Endpoint URL for SOAP note generation service",
     )
-    
+
     # Logging settings
     LOG_LEVEL: str = Field(
         default="INFO",
@@ -51,7 +51,7 @@ class Settings(BaseSettings):
         default="500 MB",
         description="Log rotation size"
     )
-    
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
