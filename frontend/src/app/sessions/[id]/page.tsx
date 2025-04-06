@@ -1,9 +1,11 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { Navigation } from "@/components/Navigation";
 import Link from "next/link";
+import { toast } from "react-toastify";
+import { NotificationProvider, useNotifications } from "@/context/NotificationContext";
 
 interface Transcript {
   serial: number;
@@ -25,8 +27,10 @@ interface SOAPNote {
   created_at: string;
 }
 
-export default function SessionDetail() {
+// Inner component that uses the notification context
+function SessionDetailContent() {
   const params = useParams();
+  const router = useRouter();
   const sessionId = params.id as string;
   
   const [sessionData, setSessionData] = useState<SessionData | null>(null);
@@ -34,9 +38,30 @@ export default function SessionDetail() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSoapLoading, setIsSoapLoading] = useState(false);
   const [isGeneratingSoap, setIsGeneratingSoap] = useState(false);
+  const [isSoapPending, setIsSoapPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [soapError, setSoapError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"transcript" | "soap">("transcript");
+  
+  const { lastMessage, isConnected, error: notificationError } = useNotifications();
+
+  // Update isSoapPending based on notifications or UI state
+  useEffect(() => {
+    if (lastMessage?.type === 'soap_update' && lastMessage.session_id === sessionId) {
+      if (lastMessage.status === 'processing') {
+        setIsSoapPending(true);
+      } else if (lastMessage.status === 'completed' || lastMessage.status === 'failed') {
+        setIsSoapPending(false);
+      }
+    }
+  }, [lastMessage, sessionId]);
+
+  // Reset isSoapPending when the SOAP note is fetched
+  useEffect(() => {
+    if (soapNote) {
+      setIsSoapPending(false);
+    }
+  }, [soapNote]);
 
   useEffect(() => {
     if (sessionId) {
@@ -44,6 +69,69 @@ export default function SessionDetail() {
       fetchSoapNote();
     }
   }, [sessionId]);
+  
+  // Handle notifications
+  useEffect(() => {
+    if (lastMessage?.type === 'soap_update') {
+      const { status, message, session_id: msgSessionId } = lastMessage;
+
+      // Ensure the message is for the current session page
+      if (msgSessionId !== sessionId) {
+        console.warn(`Received SOAP update for session ${msgSessionId}, but currently on ${sessionId}. Ignoring toast.`);
+        return;
+      }
+
+      const toastId = `soap-update-${msgSessionId}`; // Unique ID to prevent duplicates
+
+      const handleToastClick = () => {
+        console.log(`Toast clicked for session ${msgSessionId}, navigating...`);
+        router.push(`/sessions/${msgSessionId}`); // Navigate to the session page
+      };
+
+      if (status === 'completed') {
+        toast.success(
+          <div>
+            <p>✅ SOAP Note Ready!</p>
+            <p>{message}</p>
+          </div>,
+          {
+            toastId: toastId,
+            onClick: handleToastClick,
+          }
+        );
+        // Refresh SOAP note data when completed notification is received
+        fetchSoapNote();
+      } else if (status === 'failed') {
+        toast.error(
+          <div>
+            <p>❌ SOAP Note Failed</p>
+            <p>{message}</p>
+          </div>,
+          {
+            toastId: toastId,
+          }
+        );
+      } else if (status === 'processing') {
+        toast.info(
+          <div>
+            <p>⏳ Generating SOAP Note...</p>
+            <p>{message}</p>
+          </div>,
+          {
+            toastId: toastId,
+            autoClose: 3000, // Shorter duration for info
+          }
+        );
+      }
+    }
+  }, [lastMessage, router, sessionId]);
+
+  // Show notification errors
+  useEffect(() => {
+    if (notificationError) {
+      toast.error(`Notification system error: ${notificationError}`);
+    }
+  }, [notificationError]);
 
   const fetchSessionData = async () => {
     try {
@@ -104,6 +192,7 @@ export default function SessionDetail() {
   const generateSoapNote = async () => {
     try {
       setIsGeneratingSoap(true);
+      setIsSoapPending(true);
       setSoapError(null);
 
       const response = await fetch(`/backend/api/sessions/${sessionId}/soap`, {
@@ -119,10 +208,12 @@ export default function SessionDetail() {
 
       const data = await response.json();
       setSoapNote(data);
+      setIsSoapPending(false);
       setActiveTab("soap");
     } catch (error) {
       console.error("Failed to generate SOAP note:", error);
       setSoapError(`Failed to generate SOAP note: ${error instanceof Error ? error.message : String(error)}`);
+      setIsSoapPending(false);
     } finally {
       setIsGeneratingSoap(false);
     }
@@ -191,6 +282,17 @@ export default function SessionDetail() {
             <h1 className="text-2xl font-bold text-gray-900">
               {sessionData?.name || `Session ${sessionId.split('-')[0]}`}
             </h1>
+            {isConnected ? (
+              <div className="flex items-center text-xs text-green-600 mt-1">
+                <span>Live updates available</span>
+                <span className="ml-1 h-2 w-2 rounded-full bg-green-500 inline-block"></span>
+              </div>
+            ) : (
+              <div className="flex items-center text-xs text-amber-600 mt-1">
+                <span>Live updates unavailable</span>
+                <span className="ml-1 h-2 w-2 rounded-full bg-amber-500 inline-block"></span>
+              </div>
+            )}
           </div>
 
           {isLoading && (
@@ -249,7 +351,10 @@ export default function SessionDetail() {
                     onChange={(e) => setActiveTab(e.target.value as "transcript" | "soap")}
                   >
                     <option value="transcript">Transcript</option>
-                    <option value="soap">SOAP Note</option>
+                    <option value="soap">
+                      SOAP Note
+                      {soapNote ? " (Available)" : (isGeneratingSoap || isSoapPending) ? " (Pending)" : ""}
+                    </option>
                   </select>
                 </div>
                 <div className="hidden sm:block">
@@ -277,6 +382,11 @@ export default function SessionDetail() {
                         {soapNote && (
                           <span className="ml-2 bg-green-100 text-green-800 text-xs font-semibold px-2 py-0.5 rounded-full">
                             Available
+                          </span>
+                        )}
+                        {!soapNote && (isGeneratingSoap || isSoapPending) && (
+                          <span className="ml-2 bg-amber-100 text-amber-800 text-xs font-semibold px-2 py-0.5 rounded-full">
+                            Pending
                           </span>
                         )}
                       </button>
@@ -356,12 +466,24 @@ export default function SessionDetail() {
                         </div>
                       </div>
                     ) : !soapNote ? (
-                      <div className="bg-yellow-50 p-4 rounded-md border border-yellow-200 text-center">
-                        <p className="text-yellow-700">No SOAP note available for this session yet.</p>
-                        <p className="text-sm text-yellow-600 mt-2">
-                          Click the "Generate SOAP Note" button to create one based on the transcript.
-                        </p>
-                      </div>
+                      isSoapPending ? (
+                        <div className="bg-amber-50 p-4 rounded-md border border-amber-200 text-center">
+                          <div className="flex justify-center mb-2">
+                            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-amber-500 mr-2"></div>
+                            <p className="text-amber-800 font-medium">SOAP Note Generation in Progress</p>
+                          </div>
+                          <p className="text-sm text-amber-700">
+                            The SOAP note is currently being generated. Please wait a moment...
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="bg-yellow-50 p-4 rounded-md border border-yellow-200 text-center">
+                          <p className="text-yellow-700">No SOAP note available for this session yet.</p>
+                          <p className="text-sm text-yellow-600 mt-2">
+                            Click the "Generate SOAP Note" button to create one based on the transcript.
+                          </p>
+                        </div>
+                      )
                     ) : (
                       <div className="bg-gray-50 p-6 rounded-md border border-gray-200">
                         {renderFormattedSoapNote(soapNote.soap_text)}
@@ -394,5 +516,17 @@ export default function SessionDetail() {
         </div>
       </main>
     </div>
+  );
+}
+
+// Main component that wraps the content with the notification provider
+export default function SessionDetail() {
+  const params = useParams();
+  const sessionId = params.id as string;
+
+  return (
+    <NotificationProvider sessionId={sessionId}>
+      <SessionDetailContent />
+    </NotificationProvider>
   );
 } 

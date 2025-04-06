@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from fastapi import APIRouter, HTTPException
 from loguru import logger
@@ -6,6 +7,7 @@ from app.database import async_session
 from app.models import Session
 from app.soap_service import process_and_store_soap_note, get_soap_note_for_session
 from app.schemas import SOAPNoteRequest, SOAPNoteResponse
+from app.notification.service import send_soap_notification
 
 # Create router
 router = APIRouter(
@@ -41,18 +43,46 @@ async def create_soap_note(session_id: str, request: SOAPNoteRequest = None):
             
             if not db_session:
                 raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+            
+            # Get session name for notification
+            session_name = db_session.name or f"Session {session_id[:8]}"
         
         # Use default provider if not specified
         provider = request.provider if request and request.provider else "default"
         
-        # Process and store the SOAP note
-        soap_note = await process_and_store_soap_note(str(session_uuid), provider=provider)
-        
-        return SOAPNoteResponse(
-            session_id=str(soap_note.session_id),
-            soap_text=soap_note.soap_text,
-            created_at=soap_note.created_at.isoformat()
+        # Optional: Send an initial processing notification
+        await send_soap_notification(
+            session_id=session_id,
+            status="processing",
+            message=f"Generating SOAP note for {session_name}..."
         )
+        
+        try:
+            # Process and store the SOAP note
+            # asyncio.sleep(10)
+            soap_note = await process_and_store_soap_note(str(session_uuid), provider=provider)
+            
+            # Send success notification
+            await send_soap_notification(
+                session_id=session_id,
+                status="completed",
+                message=f"SOAP note for {session_name} generated successfully."
+            )
+            
+            return SOAPNoteResponse(
+                session_id=str(soap_note.session_id),
+                soap_text=soap_note.soap_text,
+                created_at=soap_note.created_at.isoformat()
+            )
+        except Exception as e:
+            # Send failure notification
+            await send_soap_notification(
+                session_id=session_id,
+                status="failed",
+                message=f"SOAP note generation for {session_name} failed: {str(e)}"
+            )
+            raise
+            
     except ValueError as e:
         if "invalid literal for UUID" in str(e):
             raise HTTPException(status_code=400, detail=f"Invalid session ID format: {session_id}")

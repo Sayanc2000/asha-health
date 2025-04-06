@@ -10,6 +10,7 @@ from .models import Transcript, SOAPNote
 from .soap_processor import get_soap_processor
 from .store.storage import get_transcript_store, TranscriptRecord
 from .config import get_settings
+from .notification.service import send_soap_notification
 
 # Get application settings
 settings = get_settings()
@@ -132,10 +133,33 @@ async def generate_soap_note_background(session_id: str, provider: str = "defaul
     """
     try:
         logger.info(f"Starting background SOAP note generation for session {session_id}")
+        
+        # Optional: Send initial processing notification
+        await send_soap_notification(
+            session_id=session_id,
+            status="processing",
+            message="Generating SOAP note in the background..."
+        )
+        
         await process_and_store_soap_note(session_id, provider=provider)
+        
+        # Send success notification
+        await send_soap_notification(
+            session_id=session_id,
+            status="completed",
+            message="SOAP note generation completed successfully."
+        )
+        
         logger.info(f"Completed background SOAP note generation for session {session_id}")
     except Exception as e:
         logger.error(f"Background SOAP note generation failed for session {session_id}: {e}")
+        
+        # Send failure notification
+        await send_soap_notification(
+            session_id=session_id,
+            status="failed",
+            message=f"SOAP note generation failed: {str(e)}"
+        )
 
 
 def schedule_soap_note_generation(session_id: str, provider: str = "default"):

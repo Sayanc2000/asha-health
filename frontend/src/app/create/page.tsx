@@ -21,6 +21,7 @@ export default function Create() {
   const [isCleaningUp, setIsCleaningUp] = useState(false);
   const [isClient, setIsClient] = useState(false);
   const [isInsecureContext, setIsInsecureContext] = useState(false);
+  const [nameValidationError, setNameValidationError] = useState(false);
   
   const wsRef = useRef<TranscriptionWebSocket | null>(null);
   const recorderRef = useRef<MicrophoneRecorder | null>(null);
@@ -196,10 +197,18 @@ export default function Create() {
    */
   const createSession = async () => {
     try {
+      // Validate the patient name field is filled
+      if (!sessionName.trim()) {
+        setError("Patient name is required");
+        setNameValidationError(true);
+        return;
+      }
+      
       setIsLoading(true);
       setError(null);
+      setNameValidationError(false);
       
-      const patientName = sessionName.trim() || "Patient Visit";
+      const patientName = sessionName.trim();
       
       // If we're in an insecure context or don't have mic permission yet,
       // try requesting it now before creating the session
@@ -249,6 +258,11 @@ export default function Create() {
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
+    if (!sessionName.trim()) {
+      setError("Patient name is required");
+      setNameValidationError(true);
+      return;
+    }
     createSession();
   };
   
@@ -628,24 +642,38 @@ export default function Create() {
             <form onSubmit={handleSubmit} className="bg-white p-6 rounded-lg shadow-md">
               <div className="mb-6">
                 <label htmlFor="sessionName" className="block text-gray-700 font-medium mb-2">
-                  Patient Name
+                  Patient Name <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"
                   id="sessionName"
                   value={sessionName}
-                  onChange={(e) => setSessionName(e.target.value)}
+                  onChange={(e) => {
+                    setSessionName(e.target.value);
+                    if (e.target.value.trim()) {
+                      setNameValidationError(false);
+                    }
+                  }}
                   placeholder="Enter patient name"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  required
+                  className={`w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 
+                    ${nameValidationError 
+                      ? "border-red-500 bg-red-50 focus:ring-red-500" 
+                      : "border-gray-300 focus:ring-blue-500"}`}
                 />
-                <p className="text-sm text-gray-500 mt-1">This will be used to identify the session</p>
+                {nameValidationError && (
+                  <p className="text-sm text-red-600 mt-1">Patient name is required</p>
+                )}
+                {!nameValidationError && (
+                  <p className="text-sm text-gray-500 mt-1">This will be used to identify the session</p>
+                )}
               </div>
               
               <button
                 type="submit"
-                disabled={isLoading}
+                disabled={isLoading || !sessionName.trim()}
                 className={`w-full px-6 py-3 rounded-lg font-medium text-lg bg-blue-600 hover:bg-blue-700 text-white
-                  ${isLoading ? "opacity-50 cursor-not-allowed" : ""}`}
+                  ${(isLoading || !sessionName.trim()) ? "opacity-50 cursor-not-allowed" : ""}`}
               >
                 {isLoading ? "Starting session..." : "Begin Patient Encounter"}
               </button>

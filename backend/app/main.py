@@ -12,7 +12,7 @@ from app.database import init_db
 from app.config import get_settings, Settings
 
 # Import routers
-from app.routers import sessions, transcription, soap, websocket
+from app.routers import sessions, transcription, soap, websocket, notifications
 
 # Get application settings
 settings = get_settings()
@@ -37,6 +37,7 @@ app.include_router(sessions.router)
 app.include_router(transcription.router)
 app.include_router(soap.router)
 app.include_router(websocket.router)
+app.include_router(notifications.router)
 
 # In-memory store for interim transcripts: {session_uuid: {serial_number: transcript}}
 # Kept for backward compatibility
@@ -78,6 +79,7 @@ async def root():
             "/api/sessions/{session_id}/soap - Get or create a SOAP note",
             "/api/v2/sessions/{session_id} - Get detailed transcripts with segments",
             "/api/v2/dispatcher/status - Get dispatcher status",
+            "/notifications/sse/{session_id} - Real-time notifications via SSE"
         ],
         "workflow": "1. Create a session with POST /api/sessions, 2. Connect to WebSocket with the returned session_id, 3. Send audio chunks via WebSocket",
         "configured_provider": settings.TRANSCRIPTION_PROVIDER,

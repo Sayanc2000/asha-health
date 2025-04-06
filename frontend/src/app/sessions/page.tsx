@@ -2,7 +2,10 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Navigation } from "@/components/Navigation";
+import { toast } from "react-toastify";
+import { NotificationProvider, useNotifications } from "@/context/NotificationContext";
 
 interface Session {
   session_id: string;
@@ -11,14 +14,77 @@ interface Session {
   created_at?: string;
 }
 
-export default function SessionsList() {
+function SessionsListContent() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
+  
+  // Get notifications from context
+  const { lastMessage, error: notificationError } = useNotifications();
 
   useEffect(() => {
     fetchSessions();
   }, []);
+  
+  // Handle SOAP note notifications
+  useEffect(() => {
+    if (lastMessage?.type === 'soap_update') {
+      const { status, message, session_id: msgSessionId } = lastMessage;
+      
+      const toastId = `soap-update-${msgSessionId}`; // Unique ID to prevent duplicates
+
+      const handleToastClick = () => {
+        console.log(`Toast clicked for session ${msgSessionId}, navigating...`);
+        router.push(`/sessions/${msgSessionId}`); // Navigate to the session page
+      };
+
+      if (status === 'completed') {
+        toast.success(
+          <div>
+            <p>✅ SOAP Note Ready!</p>
+            <p>{message}</p>
+            <small>Click to view</small>
+          </div>,
+          {
+            toastId: toastId,
+            onClick: handleToastClick,
+          }
+        );
+        // Optionally refresh the session list to update any status indicators
+        fetchSessions();
+      } else if (status === 'failed') {
+        toast.error(
+          <div>
+            <p>❌ SOAP Note Failed</p>
+            <p>{message}</p>
+          </div>,
+          {
+            toastId: toastId,
+            onClick: handleToastClick,
+          }
+        );
+      } else if (status === 'processing') {
+        toast.info(
+          <div>
+            <p>⏳ Generating SOAP Note...</p>
+            <p>{message}</p>
+          </div>,
+          {
+            toastId: toastId,
+            autoClose: 3000, // Shorter duration for info
+          }
+        );
+      }
+    }
+  }, [lastMessage, router]);
+
+  // Show notification system errors
+  useEffect(() => {
+    if (notificationError) {
+      toast.error(`Notification system error: ${notificationError}`);
+    }
+  }, [notificationError]);
 
   const fetchSessions = async () => {
     try {
@@ -181,5 +247,15 @@ export default function SessionsList() {
         </div>
       </main>
     </div>
+  );
+}
+
+// Main component that wraps the content with the notification provider
+export default function SessionsList() {
+  // Using null as sessionId will cause the provider to listen for all notifications
+  return (
+    <NotificationProvider sessionId={null}>
+      <SessionsListContent />
+    </NotificationProvider>
   );
 } 
