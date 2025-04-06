@@ -103,7 +103,7 @@ npm run dev
 ### Backend Environment Variables
 
 - `DATABASE_URL`: Database connection string
-- `TRANSCRIPTION_PROVIDER`: `deepgram`|`whisper`
+- `TRANSCRIPTION_PROVIDER`: `deepgram`
 - `DEEPGRAM_API_KEY`: API key for Deepgram
 - `OPENAI_API_KEY`: API key for Whisper Optional
 
