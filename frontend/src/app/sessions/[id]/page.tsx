@@ -132,46 +132,42 @@ export default function SessionDetail() {
   const renderFormattedSoapNote = (soapText: string) => {
     if (!soapText) return null;
     
-    // Split the text into lines
-    const lines = soapText.split('\n');
-    let currentSection: string | null = null;
-    
+    // Add custom CSS for the SOAP note
     return (
-      <div className="prose max-w-none">
-        {lines.map((line, index) => {
-          // Handle section headings (e.g., **Subjective:**)
-          if (line.match(/^\*\*([^*]+):\*\*/)) {
-            currentSection = line.replace(/^\*\*([^*]+):\*\*/, '$1');
-            return (
-              <h3 key={index} className="font-bold text-gray-800 mt-4 mb-2">
-                {currentSection}
-              </h3>
-            );
+      <div className="soap-note">
+        <style jsx global>{`
+          .soap-note h2 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #374151;
+            margin-top: 1.5rem;
+            margin-bottom: 0.75rem;
           }
-          
-          // Handle bullet points (lines starting with "- ")
-          if (line.startsWith('- ')) {
-            const content = line.substring(2);
-            return (
-              <div key={index} className="flex mb-1">
-                <span className="text-gray-500 mr-2">•</span>
-                <span className="text-gray-800">{content}</span>
-              </div>
-            );
+          .soap-note h2:first-child {
+            margin-top: 0;
           }
-          
-          // Handle empty lines
-          if (line.trim() === '') {
-            return <div key={index} className="h-2"></div>;
+          .soap-note ul {
+            margin-top: 0.5rem;
+            margin-bottom: 1.5rem;
+            padding-left: 1.5rem;
+            list-style-type: disc;
           }
-          
-          // Regular text
-          return (
-            <p key={index} className="text-gray-800 mb-1">
-              {line}
-            </p>
-          );
-        })}
+          .soap-note li {
+            margin-bottom: 0.5rem;
+            line-height: 1.5;
+          }
+          .soap-note li span {
+            color: #1F2937;
+          }
+          .soap-note li span:hover {
+            text-decoration: underline;
+            cursor: help;
+          }
+        `}</style>
+        <div 
+          className="prose max-w-none"
+          dangerouslySetInnerHTML={{ __html: soapText }}
+        />
       </div>
     );
   };
